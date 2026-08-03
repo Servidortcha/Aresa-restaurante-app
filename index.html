@@ -243,6 +243,27 @@
   .report-section{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:18px;}
   .report-title{font-weight:700; font-size:13px; margin-bottom:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);}
   .rank-row{display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--bg); font-size:13.5px;}
+
+  /* Reportes por día (desplegable) */
+  .day-accordion{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    margin-bottom:14px; overflow:hidden;
+  }
+  .day-accordion summary{
+    list-style:none; cursor:pointer; padding:16px 22px;
+    display:flex; justify-content:space-between; align-items:center;
+    font-weight:600;
+  }
+  .day-accordion summary::-webkit-details-marker{ display:none; }
+  .day-accordion summary::before{
+    content:"▸"; color:var(--copper); margin-right:10px; display:inline-block;
+    transition:transform .15s;
+  }
+  .day-accordion[open] summary::before{ transform:rotate(90deg); }
+  .day-summary-title{ display:flex; align-items:center; text-transform:capitalize; font-family:'Fraunces', serif; font-size:15px; }
+  .day-summary-meta{ font-family:'IBM Plex Mono', monospace; font-size:13px; color:var(--muted); display:flex; gap:18px; }
+  .day-summary-meta b{ color:var(--ink); font-weight:600; }
+  .day-accordion-body{ padding:4px 22px 22px 22px; border-top:1px solid var(--bg); }
   .rank-row:last-child{border-bottom:none;}
   .bar-bg{flex:1; height:6px; background:var(--bg); border-radius:4px; margin:0 14px; overflow:hidden;}
   .bar-fill{height:100%; background:var(--copper);}
@@ -487,19 +508,11 @@
       <div class="view-header">
         <div>
           <div class="view-title">Reportes</div>
-          <div class="view-sub">Resumen del día de hoy</div>
+          <div class="view-sub">Desplegá cada día para ver el detalle</div>
         </div>
         <button class="btn btn-ghost" onclick="descargarExcelReportes()">⬇ Descargar Excel</button>
       </div>
-      <div class="stat-row" id="statRow"></div>
-      <div class="report-section">
-        <div class="report-title">Productos más vendidos</div>
-        <div id="topProductos"></div>
-      </div>
-      <div class="report-section">
-        <div class="report-title">Ventas por tipo</div>
-        <div id="ventasPorTipo"></div>
-      </div>
+      <div id="reportesWrap"></div>
     </div>
 
     <!-- HISTORIAL -->
@@ -1014,40 +1027,75 @@ function renderCocina(){
 
 /* ---------- REPORTES ---------- */
 function renderReportes(){
-  const today = salesLog; // single-session demo = "today"
-  const totalVendido = today.reduce((s,sale)=>s+sale.total,0);
-  const cantPedidos = today.length;
-  const porSalon = today.filter(s=>s.type==="salon").reduce((s,x)=>s+x.total,0);
-  const porLlevar = today.filter(s=>s.type==="llevar").reduce((s,x)=>s+x.total,0);
+  const wrap = document.getElementById("reportesWrap");
+  if(salesLog.length===0){
+    wrap.innerHTML = `<div class="empty-state">Todavía no se cobró ningún pedido. Acá vas a poder desplegar el resumen de cada día.</div>`;
+    return;
+  }
 
-  document.getElementById("statRow").innerHTML = `
-    <div class="stat-card"><div class="stat-label">Total vendido hoy</div><div class="stat-value">${money(totalVendido)}</div></div>
-    <div class="stat-card"><div class="stat-label">Pedidos cobrados</div><div class="stat-value">${cantPedidos}</div></div>
-    <div class="stat-card"><div class="stat-label">Ticket promedio</div><div class="stat-value">${money(cantPedidos? Math.round(totalVendido/cantPedidos):0)}</div></div>
-  `;
+  // agrupar por fecha (más reciente primero)
+  const groups = {};
+  [...salesLog].sort((a,b)=>b.ts-a.ts).forEach(sale=>{
+    const key = new Date(sale.ts).toLocaleDateString("es-AR", {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(sale);
+  });
 
-  // top productos
-  const prodMap = {};
-  today.forEach(sale=> sale.items.forEach(i=>{
-    if(!prodMap[i.name]) prodMap[i.name] = {qty:0, total:0};
-    prodMap[i.name].qty += i.qty;
-    prodMap[i.name].total += i.qty*i.price;
-  }));
-  const ranked = Object.entries(prodMap).sort((a,b)=>b[1].qty-a[1].qty).slice(0,6);
-  const maxQty = ranked.length ? ranked[0][1].qty : 1;
-  const topEl = document.getElementById("topProductos");
-  topEl.innerHTML = ranked.length ? ranked.map(([name,d])=>`
-    <div class="rank-row">
-      <span style="width:180px;">${name}</span>
-      <div class="bar-bg"><div class="bar-fill" style="width:${(d.qty/maxQty*100).toFixed(0)}%"></div></div>
-      <span style="font-family:'IBM Plex Mono',monospace;">${d.qty}u · ${money(d.total)}</span>
-    </div>
-  `).join("") : `<div class="empty-state">Todavía no se cobró ningún pedido hoy.</div>`;
+  const fechas = Object.keys(groups);
 
-  document.getElementById("ventasPorTipo").innerHTML = (porSalon+porLlevar>0) ? `
-    <div class="rank-row"><span style="width:180px;">Salón</span><div class="bar-bg"><div class="bar-fill" style="width:${(porSalon/(porSalon+porLlevar)*100).toFixed(0)}%"></div></div><span style="font-family:'IBM Plex Mono',monospace;">${money(porSalon)}</span></div>
-    <div class="rank-row"><span style="width:180px;">Para llevar</span><div class="bar-bg"><div class="bar-fill" style="width:${(porLlevar/(porSalon+porLlevar)*100).toFixed(0)}%"></div></div><span style="font-family:'IBM Plex Mono',monospace;">${money(porLlevar)}</span></div>
-  ` : `<div class="empty-state">Sin datos todavía.</div>`;
+  wrap.innerHTML = fechas.map((fecha, idx)=>{
+    const ventasDia = groups[fecha];
+    const totalVendido = ventasDia.reduce((s,v)=>s+v.total,0);
+    const cantPedidos = ventasDia.length;
+    const ticketProm = cantPedidos ? Math.round(totalVendido/cantPedidos) : 0;
+    const porSalon = ventasDia.filter(v=>v.type==="salon").reduce((s,v)=>s+v.total,0);
+    const porLlevar = ventasDia.filter(v=>v.type==="llevar").reduce((s,v)=>s+v.total,0);
+
+    const prodMap = {};
+    ventasDia.forEach(sale=> sale.items.forEach(i=>{
+      if(!prodMap[i.name]) prodMap[i.name] = {qty:0, total:0};
+      prodMap[i.name].qty += i.qty;
+      prodMap[i.name].total += i.qty*i.price;
+    }));
+    const ranked = Object.entries(prodMap).sort((a,b)=>b[1].qty-a[1].qty).slice(0,6);
+    const maxQty = ranked.length ? ranked[0][1].qty : 1;
+
+    return `
+      <details class="day-accordion" ${idx===0 ? "open" : ""}>
+        <summary>
+          <span class="day-summary-title">${fecha}</span>
+          <span class="day-summary-meta">
+            <span><b>${money(totalVendido)}</b></span>
+            <span>${cantPedidos} pedido${cantPedidos===1?"":"s"}</span>
+          </span>
+        </summary>
+        <div class="day-accordion-body">
+          <div class="stat-row" style="margin-bottom:18px;">
+            <div class="stat-card"><div class="stat-label">Total vendido</div><div class="stat-value">${money(totalVendido)}</div></div>
+            <div class="stat-card"><div class="stat-label">Pedidos cobrados</div><div class="stat-value">${cantPedidos}</div></div>
+            <div class="stat-card"><div class="stat-label">Ticket promedio</div><div class="stat-value">${money(ticketProm)}</div></div>
+          </div>
+          <div class="report-section" style="margin-bottom:14px;">
+            <div class="report-title">Productos más vendidos</div>
+            ${ranked.length ? ranked.map(([name,d])=>`
+              <div class="rank-row">
+                <span style="width:180px;">${name}</span>
+                <div class="bar-bg"><div class="bar-fill" style="width:${(d.qty/maxQty*100).toFixed(0)}%"></div></div>
+                <span style="font-family:'IBM Plex Mono',monospace;">${d.qty}u · ${money(d.total)}</span>
+              </div>
+            `).join("") : `<div class="empty-state">Sin datos.</div>`}
+          </div>
+          <div class="report-section" style="margin-bottom:0;">
+            <div class="report-title">Ventas por tipo</div>
+            ${(porSalon+porLlevar>0) ? `
+              <div class="rank-row"><span style="width:180px;">Salón</span><div class="bar-bg"><div class="bar-fill" style="width:${(porSalon/(porSalon+porLlevar)*100).toFixed(0)}%"></div></div><span style="font-family:'IBM Plex Mono',monospace;">${money(porSalon)}</span></div>
+              <div class="rank-row"><span style="width:180px;">Para llevar</span><div class="bar-bg"><div class="bar-fill" style="width:${(porLlevar/(porSalon+porLlevar)*100).toFixed(0)}%"></div></div><span style="font-family:'IBM Plex Mono',monospace;">${money(porLlevar)}</span></div>
+            ` : `<div class="empty-state">Sin datos.</div>`}
+          </div>
+        </div>
+      </details>
+    `;
+  }).join("");
 }
 
 /* ---------- Cobrar mesa ---------- */
