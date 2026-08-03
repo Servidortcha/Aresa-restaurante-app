@@ -489,6 +489,7 @@
           <div class="view-title">Reportes</div>
           <div class="view-sub">Resumen del día de hoy</div>
         </div>
+        <button class="btn btn-ghost" onclick="descargarExcelReportes()">⬇ Descargar Excel</button>
       </div>
       <div class="stat-row" id="statRow"></div>
       <div class="report-section">
@@ -508,6 +509,7 @@
           <div class="view-title">Historial de pedidos</div>
           <div class="view-sub">Todos los pedidos cobrados, agrupados por día</div>
         </div>
+        <button class="btn btn-ghost" onclick="descargarExcelHistorial()">⬇ Descargar Excel</button>
       </div>
       <div id="historialWrap"></div>
     </div>
@@ -576,6 +578,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 /* ---------- LOGIN ---------- */
 let currentUser = null; // {role, nombre} — solo en memoria, se pierde al recargar
@@ -1118,6 +1121,71 @@ function renderHistorial(){
       </div>
     `;
   }).join("");
+}
+
+/* ---------- EXPORTAR A EXCEL ---------- */
+function descargarExcelHistorial(){
+  if(salesLog.length===0){ alert("Todavía no hay ventas para exportar."); return; }
+  const filas = [...salesLog].sort((a,b)=>b.ts-a.ts).map(v=>({
+    "Fecha": new Date(v.ts).toLocaleDateString("es-AR"),
+    "Hora": new Date(v.ts).toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit'}),
+    "Origen": v.label,
+    "Detalle": v.items.map(i=>`${i.qty}x ${i.name}`).join(", "),
+    "Total": v.total
+  }));
+  const ws = XLSX.utils.json_to_sheet(filas);
+  ws['!cols'] = [{wch:12},{wch:8},{wch:22},{wch:60},{wch:12}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Historial");
+  XLSX.writeFile(wb, `historial-popeye-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function descargarExcelReportes(){
+  if(salesLog.length===0){ alert("Todavía no hay ventas para exportar."); return; }
+  const totalVendido = salesLog.reduce((s,v)=>s+v.total,0);
+  const cantPedidos = salesLog.length;
+  const porSalon = salesLog.filter(v=>v.type==="salon").reduce((s,v)=>s+v.total,0);
+  const porLlevar = salesLog.filter(v=>v.type==="llevar").reduce((s,v)=>s+v.total,0);
+
+  const resumen = [
+    {"Métrica":"Total vendido", "Valor": totalVendido},
+    {"Métrica":"Pedidos cobrados", "Valor": cantPedidos},
+    {"Métrica":"Ticket promedio", "Valor": cantPedidos ? Math.round(totalVendido/cantPedidos) : 0},
+    {"Métrica":"Ventas Salón", "Valor": porSalon},
+    {"Métrica":"Ventas Para llevar", "Valor": porLlevar},
+  ];
+
+  const prodMap = {};
+  salesLog.forEach(sale=> sale.items.forEach(i=>{
+    if(!prodMap[i.name]) prodMap[i.name] = {qty:0, total:0};
+    prodMap[i.name].qty += i.qty;
+    prodMap[i.name].total += i.qty*i.price;
+  }));
+  const productos = Object.entries(prodMap)
+    .sort((a,b)=>b[1].qty-a[1].qty)
+    .map(([name,d])=>({"Producto":name, "Cantidad vendida":d.qty, "Total":d.total}));
+
+  const ventas = [...salesLog].sort((a,b)=>b.ts-a.ts).map(v=>({
+    "Fecha": new Date(v.ts).toLocaleDateString("es-AR"),
+    "Hora": new Date(v.ts).toLocaleTimeString("es-AR",{hour:'2-digit',minute:'2-digit'}),
+    "Origen": v.label,
+    "Total": v.total
+  }));
+
+  const wb = XLSX.utils.book_new();
+  const wsResumen = XLSX.utils.json_to_sheet(resumen);
+  wsResumen['!cols'] = [{wch:20},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
+
+  const wsProductos = XLSX.utils.json_to_sheet(productos);
+  wsProductos['!cols'] = [{wch:30},{wch:16},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, wsProductos, "Productos vendidos");
+
+  const wsVentas = XLSX.utils.json_to_sheet(ventas);
+  wsVentas['!cols'] = [{wch:12},{wch:8},{wch:22},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, wsVentas, "Ventas");
+
+  XLSX.writeFile(wb, `reporte-popeye-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 /* ---------- CLOCK ---------- */
